@@ -1,58 +1,38 @@
-const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const line = require("@line/bot-sdk");
+const axios = require('axios');
+const path = require('path');
 
-const app = express();
-app.use(express.json());
+// --- 投稿用関数 ---
+async function postToInstagram(fileName) {
+    const igId = process.env.IG_BUSINESS_ID;
+    const token = process.env.IG_ACCESS_TOKEN;
+    
+    // Render上のあなたのURL (例: https://my-app.onrender.com)
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || 'https://あなたのアプリ名.onrender.com';
+    const imageUrl = `${baseUrl}/uploads/${fileName}`;
 
-const config = {
-  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-};
+    console.log('Instagram投稿開始。画像URL:', imageUrl);
 
-const client = new line.Client(config);
-
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-
-app.post("/webhook", async (req, res) => {
-  try {
-    const events = req.body.events || [];
-
-    for (const ev of events) {
-      if (ev.type !== "message") continue;
-
-      if (ev.message.type === "image") {
-        const messageId = ev.message.id;
-
-        const stream = await client.getMessageContent(messageId);
-
-        const filename = `line_${messageId}.jpg`;
-        const filepath = path.join(uploadDir, filename);
-
-        await new Promise((resolve, reject) => {
-          const writable = fs.createWriteStream(filepath);
-          stream.pipe(writable);
-          stream.on("end", resolve);
-          stream.on("error", reject);
+    try {
+        // Step 1: コンテナ作成
+        const container = await axios.post(`https://graph.facebook.com/v21.0/${igId}/media`, {
+            image_url: imageUrl,
+            caption: 'LINEからの自動投稿テスト #bot',
+            access_token: token
         });
 
-        console.log("Saved image:", filepath);
-      } else {
-        console.log("Text message:", ev.message.text);
-      }
+        // Step 2: 公開
+        await axios.post(`https://graph.facebook.com/v21.0/${igId}/media_publish`, {
+            creation_id: container.data.id,
+            access_token: token
+        });
+
+        console.log('★Instagram投稿に成功しました！');
+    } catch (err) {
+        console.error('★投稿失敗:', err.response ? err.response.data : err.message);
     }
+}
 
-    res.sendStatus(200);
-  } catch (err) {
-    console.error(err);
-    res.sendStatus(500);
-  }
-});
-
-app.use("/uploads", express.static(uploadDir));
-
-app.get("/", (req, res) => res.send("LINE Webhook running"));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port", PORT));
+// --- LINE画像保存処理の中 ---
+// Saved image: /opt/.../line_xxxxx.jpg のログの直後に追加
+const fileName = path.basename(filePath); 
+postToInstagram(fileName); // 投稿関数を呼び出す
