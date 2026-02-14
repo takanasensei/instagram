@@ -7,7 +7,7 @@ const fs = require('fs');
 
 // --- 1. 設定・初期化 ---
 const config = {
-    // Renderの設定名（CHANNEL_ACCESS_TOKEN）と標準名の両方に対応
+    // Renderの設定名と標準名の両方をサポート
     channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN || process.env.LINE_CHANNEL_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
@@ -25,10 +25,10 @@ if (!fs.existsSync('./uploads')) {
     fs.mkdirSync('./uploads');
 }
 
-// ユーザーごとの指示を一時保存するメモリ (再起動でリセットされます)
+// ユーザーごとの指示を一時保存するメモリ
 const userInstructions = new Map();
 
-// --- 2. AIキャプション生成関数（指示反映版） ---
+// --- 2. AIキャプション生成関数 ---
 async function generateAICaption(imageUrl, userInstruction = "特になし") {
     const systemPrompt = `
 あなたは山梨県河口湖にある、無料の保護猫カフェ「アトリエ高菜先生」の広報担当AIです。
@@ -63,7 +63,7 @@ async function generateAICaption(imageUrl, userInstruction = "特になし") {
     }
 }
 
-// --- 3. Instagram投稿関数 ---
+// --- 3. Instagram投稿関数（待機処理を追加） ---
 async function postToInstagram(fileName, instruction) {
     const igId = process.env.IG_BUSINESS_ID;
     const token = process.env.IG_ACCESS_TOKEN;
@@ -73,20 +73,26 @@ async function postToInstagram(fileName, instruction) {
     try {
         const aiCaption = await generateAICaption(imageUrl, instruction);
         
-        // メディアコンテナ作成
+        console.log("1. メディアコンテナを作成中...");
         const container = await axios.post(`https://graph.facebook.com/v21.0/${igId}/media`, {
             image_url: imageUrl,
             caption: aiCaption,
             access_token: token
         });
 
-        // 公開
+        const creationId = container.data.id;
+
+        // --- 修正ポイント：画像処理待ち時間を導入 ---
+        console.log("2. インスタ側の画像処理を10秒待ちます...");
+        await new Promise(resolve => setTimeout(resolve, 10000)); 
+
+        console.log("3. 公開（パブリッシュ）実行！");
         await axios.post(`https://graph.facebook.com/v21.0/${igId}/media_publish`, {
-            creation_id: container.data.id,
+            creation_id: creationId,
             access_token: token
         });
 
-        console.log("★Instagram投稿成功！ 指示内容:", instruction);
+        console.log("★Instagram投稿に成功しました！");
     } catch (err) {
         console.error("★投稿失敗:", err.response?.data || err.message);
     }
@@ -106,7 +112,7 @@ app.post('/webhook', express.json(), (req, res) => {
 });
 
 async function handleEvent(event) {
-    // A. テキストメッセージが来たら「指示」として保存
+    // 指示（テキスト）の受け取り
     if (event.type === 'message' && event.message.type === 'text') {
         const text = event.message.text;
         userInstructions.set(event.source.userId, text);
@@ -117,14 +123,13 @@ async function handleEvent(event) {
         });
     }
 
-    // B. 画像が来たら投稿処理
+    // 画像の受け取りと投稿
     if (event.type === 'message' && event.message.type === 'image') {
         const messageId = event.message.id;
         const userId = event.source.userId;
         const fileName = `line_${messageId}.jpg`;
         const filePath = path.join(__dirname, 'uploads', fileName);
 
-        // 保存されていた指示を取得（なければデフォルト）
         const instruction = userInstructions.get(userId) || "自由に可愛く紹介して";
 
         try {
@@ -140,15 +145,12 @@ async function handleEvent(event) {
 
             return new Promise((resolve) => {
                 writer.on('finish', async () => {
-                    // Instagramへ投稿
                     postToInstagram(fileName, instruction);
-                    
-                    // 指示を使い終わったら削除
                     userInstructions.delete(userId);
 
                     await client.replyMessage({
                         replyToken: event.replyToken,
-                        messages: [{ type: 'text', text: '写真を預かったにゃ！指示通りに作ってアップしておくから、インスタを見てにゃ！' }]
+                        messages: [{ type: 'text', text: '写真を預かったにゃ！10秒くらいでインスタに反映されるはずだにゃ！' }]
                     });
                     resolve();
                 });
