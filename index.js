@@ -78,24 +78,21 @@ async function generateAICaption(imageUrl) {
 async function postToInstagram(fileName) {
     const igId = process.env.IG_BUSINESS_ID;
     const token = process.env.IG_ACCESS_TOKEN;
-    const baseUrl = process.env.RENDER_EXTERNAL_URL || `https://${process.env.RENDER_SERVICE_NAME}.onrender.com`;
+    const baseUrl = process.env.RENDER_EXTERNAL_URL;
     const imageUrl = `${baseUrl}/uploads/${fileName}`;
 
     console.log("Instagram投稿プロセス開始... 画像URL:", imageUrl);
 
     try {
-        // 1. AIに文章を考えてもらう
         const aiCaption = await generateAICaption(imageUrl);
         console.log("生成されたキャプション:", aiCaption);
 
-        // 2. メディアコンテナ作成
         const container = await axios.post(`https://graph.facebook.com/v21.0/${igId}/media`, {
             image_url: imageUrl,
             caption: aiCaption,
             access_token: token
         });
 
-        // 3. 公開実行
         await axios.post(`https://graph.facebook.com/v21.0/${igId}/media_publish`, {
             creation_id: container.data.id,
             access_token: token
@@ -110,6 +107,8 @@ async function postToInstagram(fileName) {
 // --- 4. LINE Webhook処理 ---
 app.post('/webhook', express.json(), (req, res) => {
     const events = req.body.events;
+    if (!events) return res.status(200).send('OK');
+
     Promise.all(events.map(handleEvent))
         .then(() => res.status(200).send('OK'))
         .catch((err) => {
@@ -127,7 +126,6 @@ async function handleEvent(event) {
     const fileName = `line_${messageId}.jpg`;
     const filePath = path.join(__dirname, 'uploads', fileName);
 
-    // 画像のダウンロードと保存
     try {
         const response = await axios({
             method: 'get',
@@ -143,5 +141,23 @@ async function handleEvent(event) {
             writer.on('finish', async () => {
                 console.log(`Saved image: ${filePath}`);
                 
-                // Instagram投稿を非同期で実行
-                postTo
+                // Instagram投稿実行
+                postToInstagram(fileName);
+
+                await client.replyMessage({
+                    replyToken: event.replyToken,
+                    messages: [{ type: 'text', text: '写真を預かったにゃ！高菜先生（AI）が文章を考えてアップするから待っててにゃ！' }]
+                });
+                resolve();
+            });
+            writer.on('error', reject);
+        });
+    } catch (error) {
+        console.error("画像処理エラー:", error);
+    }
+}
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
