@@ -12,22 +12,19 @@ const config = {
 
 const client = new line.Client(config);
 
-// 保存先フォルダ
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-// Webhook
 app.post("/webhook", async (req, res) => {
   try {
     const events = req.body.events || [];
+
     for (const ev of events) {
       if (ev.type !== "message") continue;
 
-      // 画像だけ処理（まずは）
       if (ev.message.type === "image") {
         const messageId = ev.message.id;
 
-        // 画像バイナリ取得（stream）
         const stream = await client.getMessageContent(messageId);
 
         const filename = `line_${messageId}.jpg`;
@@ -42,21 +39,20 @@ app.post("/webhook", async (req, res) => {
 
         console.log("Saved image:", filepath);
       } else {
-        console.log("Message:", ev.message.type, ev.message.text);
+        console.log("Text message:", ev.message.text);
       }
     }
 
     res.sendStatus(200);
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     res.sendStatus(500);
   }
 });
 
-app.get("/", (req, res) => res.send("LINE Webhook running"));
-
-// 画像を公開（※次のステップで必要）
 app.use("/uploads", express.static(uploadDir));
+
+app.get("/", (req, res) => res.send("LINE Webhook running"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Server running on port", PORT));
