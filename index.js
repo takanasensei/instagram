@@ -5,13 +5,20 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 
+
+
 // --- 1. 設定・初期化 ---
+const line = require('@line/bot-sdk'); // 呼び出し方を変える
 const config = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
 
-const client = new MessagingClient(config);
+// clientの作り方を変える
+const client = new line.messagingApi.MessagingApiClient({
+    channelAccessToken: config.channelAccessToken
+});
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 
@@ -144,10 +151,10 @@ async function handleEvent(event) {
                 // Instagram投稿実行
                 postToInstagram(fileName);
 
-                await client.replyMessage({
-                    replyToken: event.replyToken,
-                    messages: [{ type: 'text', text: '写真を預かったにゃ！高菜先生（AI）が文章を考えてアップするから待っててにゃ！' }]
-                });
+               await client.replyMessage({
+    replyToken: event.replyToken,
+    messages: [{ type: 'text', text: '写真を預かったにゃ！高菜先生（AI）が文章を考えてアップするから待っててにゃ！' }]
+});
                 resolve();
             });
             writer.on('error', reject);
