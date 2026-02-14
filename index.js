@@ -1,10 +1,29 @@
+const express = require('express');
+const { MessagingClient } = require('@line/bot-sdk');
 const { OpenAI } = require("openai");
 const axios = require('axios');
 const path = require('path');
+const fs = require('fs');
 
+// --- 1. 設定・初期化 ---
+const config = {
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+    channelSecret: process.env.LINE_CHANNEL_SECRET,
+};
+
+const client = new MessagingClient(config);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const app = express();
 
-// --- 1. AIキャプション生成関数 ---
+// Renderで画像を公開するための設定
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// uploadsフォルダがなければ作成
+if (!fs.existsSync('./uploads')) {
+    fs.mkdirSync('./uploads');
+}
+
+// --- 2. AIキャプション生成関数（アトリエ高菜仕様） ---
 async function generateAICaption(imageUrl) {
     const systemPrompt = `
 あなたは山梨県河口湖にある、無料の保護猫カフェ・コミュニティスペース「アトリエ高菜先生」の広報担当AIです。
@@ -55,20 +74,20 @@ async function generateAICaption(imageUrl) {
     }
 }
 
-// --- 2. Instagram投稿メイン関数 ---
+// --- 3. Instagram投稿メイン関数 ---
 async function postToInstagram(fileName) {
     const igId = process.env.IG_BUSINESS_ID;
     const token = process.env.IG_ACCESS_TOKEN;
-    const baseUrl = process.env.RENDER_EXTERNAL_URL;
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || `https://${process.env.RENDER_SERVICE_NAME}.onrender.com`;
     const imageUrl = `${baseUrl}/uploads/${fileName}`;
 
-    console.log("Instagram投稿プロセス開始...");
-
-    // 1. AIに文章を考えてもらう
-    const aiCaption = await generateAICaption(imageUrl);
-    console.log("生成されたキャプション:", aiCaption);
+    console.log("Instagram投稿プロセス開始... 画像URL:", imageUrl);
 
     try {
+        // 1. AIに文章を考えてもらう
+        const aiCaption = await generateAICaption(imageUrl);
+        console.log("生成されたキャプション:", aiCaption);
+
         // 2. メディアコンテナ作成
         const container = await axios.post(`https://graph.facebook.com/v21.0/${igId}/media`, {
             image_url: imageUrl,
@@ -82,8 +101,47 @@ async function postToInstagram(fileName) {
             access_token: token
         });
 
-        console.log("★アトリエ高菜先生の投稿に成功しました！");
+        console.log("★Instagram投稿に成功しました！");
     } catch (err) {
         console.error("★投稿失敗:", err.response?.data || err.message);
     }
 }
+
+// --- 4. LINE Webhook処理 ---
+app.post('/webhook', express.json(), (req, res) => {
+    const events = req.body.events;
+    Promise.all(events.map(handleEvent))
+        .then(() => res.status(200).send('OK'))
+        .catch((err) => {
+            console.error(err);
+            res.status(500).end();
+        });
+});
+
+async function handleEvent(event) {
+    if (event.type !== 'message' || event.message.type !== 'image') {
+        return Promise.resolve(null);
+    }
+
+    const messageId = event.message.id;
+    const fileName = `line_${messageId}.jpg`;
+    const filePath = path.join(__dirname, 'uploads', fileName);
+
+    // 画像のダウンロードと保存
+    try {
+        const response = await axios({
+            method: 'get',
+            url: `https://api-data.line.me/v2/bot/message/${messageId}/content`,
+            headers: { 'Authorization': `Bearer ${config.channelAccessToken}` },
+            responseType: 'stream'
+        });
+
+        const writer = fs.createWriteStream(filePath);
+        response.data.pipe(writer);
+
+        return new Promise((resolve, reject) => {
+            writer.on('finish', async () => {
+                console.log(`Saved image: ${filePath}`);
+                
+                // Instagram投稿を非同期で実行
+                postTo
