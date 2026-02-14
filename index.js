@@ -1,20 +1,17 @@
 const express = require('express');
-const { MessagingClient } = require('@line/bot-sdk');
+const line = require('@line/bot-sdk');
 const { OpenAI } = require("openai");
 const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 
-
-
 // --- 1. 設定・初期化 ---
-const line = require('@line/bot-sdk'); // 呼び出し方を変える
 const config = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
 
-// clientの作り方を変える
+// 最新のSDKに合わせたクライアント作成
 const client = new line.messagingApi.MessagingApiClient({
     channelAccessToken: config.channelAccessToken
 });
@@ -22,10 +19,7 @@ const client = new line.messagingApi.MessagingApiClient({
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 
-// Renderで画像を公開するための設定
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// uploadsフォルダがなければ作成
 if (!fs.existsSync('./uploads')) {
     fs.mkdirSync('./uploads');
 }
@@ -114,7 +108,7 @@ async function postToInstagram(fileName) {
 // --- 4. LINE Webhook処理 ---
 app.post('/webhook', express.json(), (req, res) => {
     const events = req.body.events;
-    if (!events) return res.status(200).send('OK');
+    if (!events || events.length === 0) return res.status(200).send('OK');
 
     Promise.all(events.map(handleEvent))
         .then(() => res.status(200).send('OK'))
@@ -148,13 +142,12 @@ async function handleEvent(event) {
             writer.on('finish', async () => {
                 console.log(`Saved image: ${filePath}`);
                 
-                // Instagram投稿実行
                 postToInstagram(fileName);
 
-               await client.replyMessage({
-    replyToken: event.replyToken,
-    messages: [{ type: 'text', text: '写真を預かったにゃ！高菜先生（AI）が文章を考えてアップするから待っててにゃ！' }]
-});
+                await client.replyMessage({
+                    replyToken: event.replyToken,
+                    messages: [{ type: 'text', text: '写真を預かったにゃ！高菜先生（AI）が文章を考えてアップするから待っててにゃ！' }]
+                });
                 resolve();
             });
             writer.on('error', reject);
